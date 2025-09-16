@@ -101,6 +101,8 @@ app.post('/record', async (req, res) => {
 // Analysis endpoint
 async function analyzeHandler(req, res) {
   try {
+    console.log('--- 분석 요청 수신 ---');
+    console.log('Body:', req.body);
     // Validate the request body
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({
@@ -112,10 +114,15 @@ async function analyzeHandler(req, res) {
 
     // Extract and log parameters
     const { range, from, to } = req.body;
+    console.log('Request body:', req.body);
     console.log('Request parameters:', { range, from, to });
 
-    // Validate parameters
-    if (range && (from || to)) {
+    // Validate parameters (more robust)
+    // Only treat range as present if it's a non-empty string
+    const hasRange = typeof range === 'string' && range.trim().length > 0;
+    const hasFromTo = typeof from === 'string' && typeof to === 'string' && from.length > 0 && to.length > 0;
+
+    if (hasRange && hasFromTo) {
       return res.status(400).json({
         error: 'Invalid parameters',
         message: 'Provide either range OR from/to dates, not both',
@@ -126,7 +133,7 @@ async function analyzeHandler(req, res) {
       });
     }
 
-    if (!range && (!from || !to)) {
+    if (!hasRange && !hasFromTo) {
       return res.status(400).json({
         error: 'Missing parameters',
         message: 'Provide either range OR both from and to dates',
@@ -163,6 +170,7 @@ async function analyzeHandler(req, res) {
       fromDate = from;
       toDate = to;
     }
+    console.log(`[분석] from: ${fromDate}, to: ${toDate}`);
 
     console.log('Querying Supabase for date range:', { fromDate, toDate });
     
@@ -174,18 +182,19 @@ async function analyzeHandler(req, res) {
       .order('date', { ascending: true });
 
     if (error) {
-      console.error('Supabase query error:', error);
+      console.error('[분석] Supabase query error:', error);
+      console.log(`[분석] 실패: DB 조회 에러 (${error.message})`);
       return res.status(500).json({ error: error.message });
     }
 
     if (!data || data.length === 0) {
-      console.log('No records found for date range:', { fromDate, toDate });
+      console.log(`[분석] 실패: 데이터 없음 (${fromDate} ~ ${toDate})`);
       return res.json({ 
         result: 'No data found for the specified period. Please record some entries first.'
       });
     }
 
-    console.log('Found records:', data.length);
+    console.log(`[분석] 조회된 기록 수: ${data.length}`);
 
     const formatted = data
       .map(row => {
@@ -194,12 +203,11 @@ async function analyzeHandler(req, res) {
       })
       .join('\n');
 
-    console.log('Formatted data for OpenAI:', formatted);
+    console.log('[분석] OpenAI로 보낼 데이터:', formatted);
     
     let completion;
     try {
-      console.log('Sending request to OpenAI with formatted data:', formatted);
-      
+      console.log('[분석] OpenAI API 요청');
       completion = await openai.chat.completions.create({
         model: 'gpt-4',
         messages: [
@@ -215,13 +223,11 @@ async function analyzeHandler(req, res) {
         max_tokens: 500,
         temperature: 0.7
       });
-      
-      console.log('OpenAI API response received:', {
-        status: 'success',
-        content: completion.choices?.[0]?.message?.content
-      });
+      console.log('[분석] OpenAI 응답 수신:', completion.choices?.[0]?.message?.content);
+      console.log(`[분석] 성공: ${fromDate} ~ ${toDate}`);
     } catch (openaiError) {
-      console.error('OpenAI API error:', openaiError);
+      console.error('[분석] OpenAI API error:', openaiError);
+      console.log(`[분석] 실패: OpenAI 에러 (${openaiError.message})`);
       throw new Error(`OpenAI API error: ${openaiError.message}`);
     }
 
@@ -239,8 +245,28 @@ async function analyzeHandler(req, res) {
   }
 }
 
+
 app.get('/analyze', analyzeHandler);
 app.post('/analyze', analyzeHandler);
+
+// 월간 분석 엔드포인트 추가
+app.post('/analyze-monthly', async (req, res) => {
+  console.log('==============================');
+  console.log('[월간분석] analyze-monthly 요청 수신');
+  console.log('[월간분석] body:', req.body);
+  // 월간 분석은 항상 from/to만 전달
+  // 프론트엔드에서 from/to만 보내는 경우 그대로 사용
+  // range는 절대 추가하지 않음
+  // 분석 결과를 받아서 별도 로그 남김
+  // analyzeHandler가 res.json()을 직접 호출하므로, 결과를 가로채려면 래핑 필요
+  const originalJson = res.json.bind(res);
+  res.json = (data) => {
+    console.log('[월간분석] 분석 결과:', data);
+    console.log('==============================');
+    return originalJson(data);
+  };
+  await analyzeHandler(req, res);
+});
 
 // Chatbot endpoint
 app.post('/chat', async (req, res) => {
