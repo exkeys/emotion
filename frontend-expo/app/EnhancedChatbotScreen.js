@@ -1,24 +1,5 @@
+  import React, { useState, useRef, useEffect } from "react";
   // 기록 저장 등에서 window 이벤트로 분석 체크를 트리거할 수 있도록 이벤트 리스너 등록
-  useEffect(() => {
-    function handleMonthlyProposal() {
-      checkAndProposeMonthlyAnalysis();
-    }
-    function handleWeeklyProposal() {
-      checkAndProposeWeeklyAnalysis();
-    }
-    if (typeof window !== 'undefined' && window.addEventListener) {
-      window.addEventListener('triggerMonthlyAnalysisProposal', handleMonthlyProposal);
-      window.addEventListener('triggerWeeklyAnalysisProposal', handleWeeklyProposal);
-    }
-    return () => {
-      if (typeof window !== 'undefined' && window.removeEventListener) {
-        window.removeEventListener('triggerMonthlyAnalysisProposal', handleMonthlyProposal);
-        window.removeEventListener('triggerWeeklyAnalysisProposal', handleWeeklyProposal);
-      }
-    };
-  }, []);
-// app/EnhancedChatbotScreen.js
-import React, { useState, useRef, useEffect } from "react";
 // chrono-node 제거, 직접 한글 날짜 파싱 함수 구현
 import dayjs from 'dayjs';
 import {
@@ -195,6 +176,26 @@ export default function EnhancedChatbotScreen() {
       console.error('주간 분석 실행 중 오류:', error);
     }
   };
+
+  // 기록 저장 시 외부에서 발생시키는 제안 이벤트 리스너 등록
+  useEffect(() => {
+    function handleMonthlyProposal() {
+      checkAndProposeMonthlyAnalysis();
+    }
+    function handleWeeklyProposal() {
+      checkAndProposeWeeklyAnalysis();
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('triggerMonthlyAnalysisProposal', handleMonthlyProposal);
+      window.addEventListener('triggerWeeklyAnalysisProposal', handleWeeklyProposal);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('triggerMonthlyAnalysisProposal', handleMonthlyProposal);
+        window.removeEventListener('triggerWeeklyAnalysisProposal', handleWeeklyProposal);
+      }
+    };
+  }, []);
   // 주간 분석 거절 버튼 핸들러
   const handleWeeklyAnalysisReject = () => {
     console.log('주간 분석 거절 버튼 클릭됨');

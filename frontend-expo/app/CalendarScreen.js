@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Modal, Text, Button, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { Calendar } from 'react-native-calendars';
-import Slider from '@react-native-community/slider';
-import { supabase } from '../utils/supabaseClient';
-import { checkWeeklyDataCompletion } from '../utils/weeklyDataChecker';
-dayjs.extend(weekday);
-
+import { View, StyleSheet } from 'react-native';
 import dayjs from 'dayjs';
 import weekday from 'dayjs/plugin/weekday';
 import 'dayjs/locale/ko';
+
+// 분리된 컴포넌트들
+import CalendarView from '../components/calendar/CalendarView';
+import RecordModal from '../components/calendar/RecordModal';
+import WeeklyStatus from '../components/calendar/WeeklyStatus';
+
+// 커스텀 훅들
+import { useWeeklyData } from '../hooks/useWeeklyData';
+import { useRecordManager } from '../hooks/useRecordManager';
 
 dayjs.extend(weekday);
 dayjs.locale('ko');
@@ -16,28 +19,21 @@ dayjs.locale('ko');
 export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [fatigue, setFatigue] = useState(5);
-  const [note, setNote] = useState('');
-  const [records, setRecords] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [weeklyStatus, setWeeklyStatus] = useState(null);
+  
+  // 커스텀 훅으로 로직 분리
+  const { weeklyStatus, refreshWeeklyStatus } = useWeeklyData();
+  const { 
+    fatigue, 
+    note, 
+    loading, 
+    records,
+    setFatigue,
+    setNote,
+    handleSave,
+    loadRecordForDate
+  } = useRecordManager(selectedDate, refreshWeeklyStatus);
 
-  // 컴포넌트 마운트 시 주간 상태 체크
-  useEffect(() => {
-    checkCurrentWeekStatus();
-  }, []);
-
-  // 주간 상태 체크
-  async function checkCurrentWeekStatus() {
-    try {
-      const result = await checkWeeklyDataCompletion();
-      setWeeklyStatus(result);
-    } catch (error) {
-      console.error('주간 상태 체크 오류:', error);
-    }
-  }
-
-  // 저장된 데이터가 변경될 때마다 주간 데이터 체크
+  // 저장된 데이터가 변경될 때마다 주간 데이터 체크 (기존 로직 유지)
   useEffect(() => {
     if (selectedDate) {
       console.log('Checking weekly data for date:', selectedDate);
@@ -52,6 +48,7 @@ export default function CalendarScreen() {
       // supabase에서 해당 주의 모든 날짜 기록 fetch
       const checkWeekRecords = async () => {
         console.log('Fetching records for week...');
+        const { supabase } = require('../utils/supabaseClient');
         const { data: weekRecords, error: weekError } = await supabase
           .from('records')
           .select('date, fatigue, notes')
@@ -76,172 +73,66 @@ export default function CalendarScreen() {
         } else {
           console.log('Week not complete yet. Need more records.');
         }
-// 어분 분석(주간 분석) 함수: 피로도 평균과 노트 모음 표시
-function suggestAnalysis({ from, to, records }) {
-  if (!records || records.length === 0) return;
-  const fatigueAvg = (
-    records.reduce((sum, rec) => sum + (rec.fatigue || 0), 0) / records.length
-  ).toFixed(2);
-  const notes = records
-    .map(
-      (rec) =>
-        `${rec.date} : ${rec.notes ? rec.notes : '(메모 없음)'}`
-    )
-    .join('\n');
-  Alert.alert(
-    '주간 분석 결과',
-    `기간: ${from} ~ ${to}\n\n평균 피곤함: ${fatigueAvg}\n\n메모:\n${notes}`,
-    [{ text: '확인', style: 'default' }]
-  );
-}
       };
       
       checkWeekRecords();
     }
   }, [records, selectedDate]);
 
-  const handleDayPress = async (day) => {
-    // 날짜 범위 및 분석 관련 로직 제거
+  // 기존 주간 분석 함수 (그대로 유지)
+  function suggestAnalysis({ from, to, records }) {
+    if (!records || records.length === 0) return;
+    const fatigueAvg = (
+      records.reduce((sum, rec) => sum + (rec.fatigue || 0), 0) / records.length
+    ).toFixed(2);
+    const notes = records
+      .map(
+        (rec) =>
+          `${rec.date} : ${rec.notes ? rec.notes : '(메모 없음)'}`
+      )
+      .join('\n');
+    
+    const { Alert } = require('react-native');
+    Alert.alert(
+      '주간 분석 결과',
+      `기간: ${from} ~ ${to}\n\n평균 피곤함: ${fatigueAvg}\n\n메모:\n${notes}`,
+      [{ text: '확인', style: 'default' }]
+    );
+  }
 
-    // Normal day selection for recording
+  const handleDayPress = async (day) => {
     setSelectedDate(day.dateString);
-    const user_id = 'test_user';
-    console.log('Fetching record for date:', day.dateString);
-    const { data, error } = await supabase
-      .from('records')
-      .select('fatigue, notes')
-      .eq('user_id', user_id)
-      .eq('date', day.dateString)
-      .maybeSingle(); // single() 대신 maybeSingle() 사용
-    if (!error && data) {
-      setFatigue(data.fatigue);
-      setNote(data.notes || '');
-    } else {
-      setFatigue(5);
-      setNote('');
-    }
+    await loadRecordForDate(day.dateString);
     setModalVisible(true);
   };
 
-  const handleSave = async () => {
-    setLoading(true);
-    const user_id = 'test_user';
-    console.log('Saving record:', { user_id, date: selectedDate, fatigue, notes: note });
-    const { error } = await supabase
-      .from('records')
-      .upsert(
-        { 
-          user_id, 
-          date: selectedDate, 
-          fatigue: parseInt(fatigue),
-          notes: note || null
-        },
-        { onConflict: ['user_id', 'date'] }
-      );
-    setLoading(false);
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-    } else {
-      setRecords({
-        ...records,
-        [selectedDate]: { fatigue, note },
-      });
+  const handleModalSave = async () => {
+    const success = await handleSave();
+    if (success) {
       setModalVisible(false);
-
-      // 저장 후 주간 상태 다시 체크
-      await checkCurrentWeekStatus();
-
-      // 월간 데이터 체크도 추가
-      const { checkMonthlyDataCompletion } = require('../utils/weeklyDataChecker');
-      const monthlyStatus = await checkMonthlyDataCompletion();
-      console.log('월간 데이터 체크 결과:', monthlyStatus);
-
-      // 주간 데이터가 완성되었는지 확인하고 알림
-      const updatedStatus = await checkWeeklyDataCompletion();
-      if (updatedStatus.isComplete && !weeklyStatus?.isComplete) {
-        Alert.alert(
-          '주간 기록 완성! 🎉',
-          '이번 주 7일간의 기록이 모두 완성되었습니다!\n챗봇 탭에서 주간 분석을 확인해보세요.',
-          [{ text: '확인', style: 'default' }]
-        );
-      }
-      // 월간 데이터가 완성되었는지 확인하고 알림 및 챗봇에 제안 트리거
-      if (monthlyStatus.isComplete) {
-        Alert.alert(
-          '월간 기록 완성! 🎉',
-          `이번 달 ${monthlyStatus.recordedDays}/${monthlyStatus.totalDays}일 기록이 완성되었습니다!\n챗봇 탭에서 월간 분석을 확인해보세요.`,
-          [{ text: '확인', style: 'default' }]
-        );
-        // 챗봇에 월간 분석 제안 트리거
-        if (window && window.dispatchEvent) {
-          window.dispatchEvent(new CustomEvent('triggerMonthlyAnalysisProposal'));
-        }
-      }
     }
   };
 
   return (
     <View style={styles.container}>
-      {/* 주간 상태 표시 */}
-      {weeklyStatus && (
-        <View style={styles.weeklyStatusContainer}>
-          <Text style={styles.weeklyStatusText}>
-            이번 주 기록: {weeklyStatus.recordedDays}/7일
-            {weeklyStatus.isComplete && " ✅ 완성!"}
-          </Text>
-          {weeklyStatus.isComplete && (
-            <Text style={styles.weeklyCompleteText}>
-              챗봇 탭에서 주간 분석을 받아보세요! 🤖
-            </Text>
-          )}
-        </View>
-      )}
-
-      <Calendar
+      <WeeklyStatus weeklyStatus={weeklyStatus} />
+      
+      <CalendarView 
+        markedDates={records}
         onDayPress={handleDayPress}
-        markedDates={{
-          ...Object.fromEntries(
-            Object.entries(records).map(([date, rec]) => [date, { marked: true }])
-          )
-        }}
       />
 
-      {/* Record Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent={true}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-            <Text style={styles.modalTitle} role="heading" nativeID="modal-title">{selectedDate} 피곤함 기록</Text>
-            <Text>피곤함 정도: {fatigue}</Text>
-            <Slider
-              style={{ width: 200, height: 40 }}
-              minimumValue={1}
-              maximumValue={10}
-              step={1}
-              value={fatigue}
-              onValueChange={setFatigue}
-              minimumTrackTintColor="#1EB1FC"
-              maximumTrackTintColor="#1EB1FC"
-              accessible={true}
-              accessibilityLabel={`피곤함 정도 슬라이더: ${fatigue}`}
-              accessibilityRole="adjustable"
-              accessibilityValue={{ min: 1, max: 10, now: fatigue }}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="메모를 입력하세요"
-              value={note}
-              onChangeText={setNote}
-              accessible={true}
-              accessibilityLabel="메모 입력"
-              accessibilityHint="피곤함에 대한 메모를 입력하세요"
-            />
-            <Button title="저장" onPress={handleSave} disabled={loading} accessibilityLabel="저장하기" />
-            <Button title="닫기" onPress={() => setModalVisible(false)} accessibilityLabel="모달 닫기" />
-          </View>
-        </View>
-      </Modal>
-
-  {/* 분석 결과 모달 및 버튼 완전 제거됨 */}
+      <RecordModal
+        visible={modalVisible}
+        selectedDate={selectedDate}
+        fatigue={fatigue}
+        note={note}
+        loading={loading}
+        onFatigueChange={setFatigue}
+        onNoteChange={setNote}
+        onSave={handleModalSave}
+        onClose={() => setModalVisible(false)}
+      />
     </View>
   );
 }
@@ -251,50 +142,5 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingTop: 40
-  },
-  weeklyStatusContainer: {
-    padding: 10,
-    backgroundColor: '#f0f9ff',
-    marginBottom: 10,
-    borderRadius: 8,
-    marginHorizontal: 10
-  },
-  weeklyStatusText: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#0369a1'
-  },
-  weeklyCompleteText: {
-    fontSize: 14,
-    textAlign: 'center',
-    color: '#059669',
-    marginTop: 5
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)'
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    width: 300,
-    minHeight: 200
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
-    width: '100%',
-    marginBottom: 10
   }
 });
