@@ -1,5 +1,4 @@
-﻿
-// Backend Server 
+﻿// Backend Server 
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -14,11 +13,17 @@ import { globalErrorHandler } from './middleware/errorHandler.js';
 import { metricsMiddleware, renderPrometheusMetrics } from './middleware/metrics.js';
 
 // 서비스 import
-import { analyzeHandler } from './services/analysisService.js';
+import {
+  analyzeCustomHandler,
+  analyzeWeeklyHandler,
+  analyzeMonthlyHandler,
+  analyzeYearlyHandler
+} from './services/analysisService.js';
 import { handleChatRequest } from './services/chatService.js';
 import { handleRecordRequest } from './services/recordService.js';
-import { createChatStreamHandler } from './services/chatStreamService.js';
-import { createAnalyzeStreamHandler } from './services/analyzeStreamService.js';
+
+// Swagger import
+import { swaggerUi, specs } from './config/swagger.js';
 
 // Express app setup
 const app = express();
@@ -39,7 +44,38 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'AI Chat App API Documentation'
+}));
+
 // Routes (기존과 동일한 엔드포인트들)
+/**
+ * @swagger
+ * /:
+ *   get:
+ *     summary: 서버 상태 확인
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: 서버가 정상 작동 중
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "API server is running"
+ *                 status:
+ *                   type: string
+ *                   example: "OK"
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
 app.get('/', (req, res) => {
   res.json({
     message: 'API server is running',
@@ -49,6 +85,36 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint (로깅에 표기된 엔드포인트 실제 구현)
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: 헬스체크 (DB 연결 상태 포함)
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: 헬스체크 결과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "OK"
+ *                 db:
+ *                   type: string
+ *                   example: "ok"
+ *                 uptime:
+ *                   type: number
+ *                   description: "서버 가동 시간 (초)"
+ *                 responseTimeMs:
+ *                   type: number
+ *                   description: "응답 시간 (밀리초)"
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ */
 app.get('/health', async (req, res) => {
   const start = Date.now();
   let db = 'ok';
@@ -74,32 +140,163 @@ app.get('/metrics', (req, res) => {
 });
 
 // Record endpoint 
+/**
+ * @swagger
+ * /record:
+ *   post:
+ *     summary: 피곤함 기록 저장
+ *     tags: [Records]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Record'
+ *     responses:
+ *       200:
+ *         description: 기록 저장 성공
+ *       400:
+ *         description: 잘못된 요청
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 app.post('/record', handleRecordRequest);
 
-// Analysis endpoints 
-app.get('/analyze', analyzeHandler);
-app.post('/analyze', analyzeHandler);
 
-// 월간 분석 엔드포인트 
-app.post('/analyze-monthly', async (req, res) => {
-  console.log('==============================');
-  console.log('[월간분석] analyze-monthly 요청 수신');
-  console.log('[월간분석] body:', req.body);
-  
-  const originalJson = res.json.bind(res);
-  res.json = (data) => {
-    console.log('[월간분석] 분석 결과:', data);
-    console.log('==============================');
-    return originalJson(data);
-  };
-  await analyzeHandler(req, res);
-});
+/**
+ * @swagger
+ * /analyze:
+ *   post:
+ *     summary: 커스텀 기간 분석
+ *     tags: [Analysis]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               from:
+ *                 type: string
+ *                 format: date
+ *               to:
+ *                 type: string
+ *                 format: date
+ *               user_id:
+ *                 type: string
+ *                 default: test_user
+ *     responses:
+ *       200:
+ *         description: 분석 결과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AnalysisResponse'
+ *       400:
+ *         description: 잘못된 요청
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+app.post('/analyze', analyzeCustomHandler);
+
+/**
+ * @swagger
+ * /analyze-weekly:
+ *   get:
+ *     summary: 주간 분석 (이번주)
+ *     tags: [Analysis]
+ *     parameters:
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           default: test_user
+ *     responses:
+ *       200:
+ *         description: 주간 분석 결과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AnalysisResponse'
+ */
+app.get('/analyze-weekly', analyzeWeeklyHandler);
+
+/**
+ * @swagger
+ * /analyze-monthly:
+ *   get:
+ *     summary: 월간 분석 (이번달)
+ *     tags: [Analysis]
+ *     parameters:
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           default: test_user
+ *     responses:
+ *       200:
+ *         description: 월간 분석 결과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AnalysisResponse'
+ */
+app.get('/analyze-monthly', analyzeMonthlyHandler);
+
+/**
+ * @swagger
+ * /analyze-yearly:
+ *   get:
+ *     summary: 연간 분석 (올해)
+ *     tags: [Analysis]
+ *     parameters:
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           default: test_user
+ *     responses:
+ *       200:
+ *         description: 연간 분석 결과
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AnalysisResponse'
+ */
+app.get('/analyze-yearly', analyzeYearlyHandler);
 
 // Chatbot endpoint 
+/**
+ * @swagger
+ * /chat:
+ *   post:
+ *     summary: AI 챗봇과 대화
+ *     tags: [Chat]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChatMessage'
+ *     responses:
+ *       200:
+ *         description: 챗봇 응답
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ChatResponse'
+ *       400:
+ *         description: 잘못된 요청
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 app.post('/chat', handleChatRequest);
-// Streaming endpoints (SSE)
-app.get('/chat/stream', createChatStreamHandler());
-app.get('/analyze/stream', createAnalyzeStreamHandler());
 
 // 404 handler 
 app.use((req, res) => {
@@ -110,9 +307,7 @@ app.use((req, res) => {
       'GET /health',
       'POST /record',
       'GET|POST /analyze',
-      'POST /chat',
-      'GET /chat/stream',
-      'GET /analyze/stream'
+      'POST /chat'
     ]
   });
 });
@@ -127,9 +322,9 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('Available endpoints:');
   console.log('- GET  / (Server status)');
   console.log('- GET  /health (Health check)');
+  console.log('- GET  /api-docs (Swagger API Documentation)');
   console.log('- POST /record (Save record)');
   console.log('- GET|POST /analyze (Analyze records)');
   console.log('- POST /chat (Chatbot)');
-  console.log('- GET  /chat/stream (SSE Chat)');
-  console.log('- GET  /analyze/stream (SSE Analyze)');
+  console.log('- GET  /metrics (Prometheus metrics)');
 });
