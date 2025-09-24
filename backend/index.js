@@ -246,7 +246,9 @@ app.get('/analyze-weekly', analyzeWeeklyHandler);
  *               $ref: '#/components/schemas/AnalysisResponse'
  */
 app.get('/analyze-monthly', analyzeMonthlyHandler);
+
 app.post('/analyze-monthly', analyzeMonthlyHandler);
+
 
 /**
  * @swagger
