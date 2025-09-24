@@ -317,6 +317,15 @@ export default function EnhancedChatbotScreen() {
           const year = dayjs().year();
           return { from: dayjs(`${year}-${match2[1]}-${match2[2]}`), to: dayjs(`${year}-${match2[1]}-${match2[2]}`) };
         }
+        // MM월(한달) 또는 MM월 분석
+        const monthMatch = text.match(/(\d{1,2})월(\s*한달)?/);
+        if (monthMatch) {
+          const year = dayjs().year();
+          const month = monthMatch[1].padStart(2, '0');
+          const from = dayjs(`${year}-${month}-01`);
+          const to = from.endOf('month');
+          return { from, to };
+        }
         return null;
       }
       const dateRange = parseKoreanDate(userMessage);
