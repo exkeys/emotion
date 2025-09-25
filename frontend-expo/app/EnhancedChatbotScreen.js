@@ -1,4 +1,5 @@
   import React, { useState, useRef, useEffect } from "react";
+  import { useNavigation, useFocusEffect } from '@react-navigation/native';
   // 기록 저장 등에서 window 이벤트로 분석 체크를 트리거할 수 있도록 이벤트 리스너 등록
 // chrono-node 제거, 직접 한글 날짜 파싱 함수 구현
 import dayjs from 'dayjs';
@@ -20,6 +21,14 @@ import { checkMonthlyDataCompletion } from '../utils/weeklyDataChecker';
 import Constants from 'expo-constants';
 
 export default function EnhancedChatbotScreen() {
+  const navigation = useNavigation();
+  // 챗봇 화면이 focus될 때마다 주간/월간 분석 제안 체크
+  useFocusEffect(
+    React.useCallback(() => {
+      checkAndProposeWeeklyAnalysis();
+      checkAndProposeMonthlyAnalysis();
+    }, [])
+  );
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -114,40 +123,7 @@ export default function EnhancedChatbotScreen() {
             isWeeklyProposal: true
           }]);
         }
-        // 주간 분석 요청 및 fetch를 result.weekRange로 바로 실행
-        console.log('주간 분석 요청:', result.weekRange);
-        if (!result.weekRange || !result.weekRange.from || !result.weekRange.to) {
-          setMessages(prev => [...prev, {
-            role: "assistant",
-            content: "주간 분석을 위한 데이터가 충분하지 않습니다. 기록을 더 입력해 주세요."
-          }]);
-          setPendingWeeklyAnalysis(false);
-          setWeeklyData(null);
-          setLoading(false);
-          setIsAnalyzing(false);
-          return;
-        }
-        const response = await fetch(`${backendUrl}/analyze`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: result.weekRange.from,
-            to: result.weekRange.to,
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          setAnalysisError(data.error || '분석 중 오류가 발생했습니다');
-          throw new Error(data.error || '분석 중 오류가 발생했습니다');
-        }
-        setAnalysisResult(data.result);
-        setMessages(prev => [...prev, {
-          role: "assistant",
-          content: `📊 이번 주 감정 분석 결과:\n\n${data.result}`,
-          isAnalysisResult: true
-        }]);
+        setPendingWeeklyAnalysis(true);
       }
     } catch (error) {
       setAnalysisError(error.message);
@@ -157,9 +133,6 @@ export default function EnhancedChatbotScreen() {
         content: "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
       }]);
     }
-    setPendingWeeklyAnalysis(false);
-    setWeeklyData(null);
-    setLoading(false);
     setIsAnalyzing(false);
   }
 
@@ -167,14 +140,59 @@ export default function EnhancedChatbotScreen() {
   // 주간 분석 버튼 핸들러
   const handleWeeklyAnalysisButton = async () => {
     if (isAnalyzing) return;
+    if (!weeklyData || !weeklyData.from || !weeklyData.to) {
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "주간 분석을 위한 데이터가 충분하지 않습니다. 기록을 더 입력해 주세요."
+      }]);
+      setPendingWeeklyAnalysis(false);
+      setWeeklyData(null);
+      setLoading(false);
+      setIsAnalyzing(false);
+      return;
+    }
     try {
-      console.log('주간 분석 버튼 클릭됨');
+      setIsAnalyzing(true);
+      setLoading(true);
       setMessages(prev => [...prev, { role: "user", content: '네, 주간 분석해주세요!' }]);
-      await checkAndProposeWeeklyAnalysis();
+      const backendUrl = Constants.expoConfig?.extra?.backendUrl;
+      if (!backendUrl) throw new Error('Backend URL이 설정되지 않았습니다');
+      const response = await fetch(`${backendUrl}/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: weeklyData.from,
+          to: weeklyData.to,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setAnalysisError(data.error || '분석 중 오류가 발생했습니다');
+        throw new Error(data.error || '분석 중 오류가 발생했습니다');
+      }
+      setAnalysisResult(data.result);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `📊 이번 주 감정 분석 결과:\n\n${data.result}`,
+        isAnalysisResult: true
+      }]);
+      // 분석 완료된 주차 proposal status 저장
+      const weekKey = getCurrentWeekKey();
+      setAnalysisProposalStatus(weekKey, true);
     } catch (error) {
       setAnalysisError(error.message);
       console.error('주간 분석 실행 중 오류:', error);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+      }]);
     }
+    setPendingWeeklyAnalysis(false);
+    setWeeklyData(null);
+    setLoading(false);
+    setIsAnalyzing(false);
   };
 
   // 기록 저장 시 외부에서 발생시키는 제안 이벤트 리스너 등록
@@ -204,6 +222,9 @@ export default function EnhancedChatbotScreen() {
     setIsAnalyzing(false);
     setAnalysisResult(null);
     setAnalysisError(null);
+    // 거절한 주차도 proposal status 저장
+    const weekKey = getCurrentWeekKey();
+    setAnalysisProposalStatus(weekKey, true);
     setMessages(prev => [...prev, {
       role: "assistant",
       content: "알겠습니다! 언제든지 필요하시면 말씀해주세요. 😊"
