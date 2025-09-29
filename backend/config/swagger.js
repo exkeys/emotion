@@ -1,7 +1,6 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
-const port = process.env.PORT || 5001;
 const options = {
   definition: {
     openapi: '3.0.0',
@@ -15,7 +14,8 @@ const options = {
     },
     servers: [
       {
-        url: `http://localhost:${port}`,
+        // url: `http://localhost:${port}`,
+        url: 'http://localhost:5001',
         description: 'Development server',
       },
       {
