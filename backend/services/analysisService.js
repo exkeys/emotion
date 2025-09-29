@@ -19,7 +19,9 @@ function formatDataForAnalysis(data) {
       } else {
         fatigueText = '알 수 없음';
       }
-      return `${row.date}: 피곤함 ${fatigue}점(${fatigueText}) (${row.notes?.trim() || '기록 없음'})`;
+      // 감정(emotion)도 함께 표기
+      const emotion = row.emotion ? `감정: ${row.emotion}` : '';
+      return `${row.date}: 피곤함 ${fatigue}점(${fatigueText}) (${row.notes?.trim() || '기록 없음'})${emotion ? ' | ' + emotion : ''}`;
     })
     .join('\n');
 }
@@ -53,7 +55,7 @@ async function analyzePeriod({ user_id = 'test_user', fromDate, toDate }) {
   // Supabase 조회
   const { data, error } = await supabase
     .from('records')
-    .select('*')
+    .select('date, fatigue, notes, emotion')
     .eq('user_id', user_id)
     .gte('date', fromDate)
     .lte('date', toDate)
