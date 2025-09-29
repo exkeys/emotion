@@ -28,8 +28,16 @@ import { swaggerUi, specs } from './config/swagger.js';
 // Express app setup
 const app = express();
 
-// [CORS-TEST] 모든 origin 허용 (나중에 주석처리)
-app.use(cors({ origin: true }));
+// [CORS-TEST] 개발용 허용 origin 명시 (나중에 주석처리)
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://localhost:5001',
+  'http://localhost:4000'
+];
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 // Simple request logging 
