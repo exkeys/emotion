@@ -28,8 +28,8 @@ import { swaggerUi, specs } from './config/swagger.js';
 // Express app setup
 const app = express();
 
-// Middleware for CORS and JSON parsing
-app.use(cors());
+// [CORS-TEST] 모든 origin 허용 (나중에 주석처리)
+app.use(cors({ origin: true }));
 app.use(express.json());
 
 // Simple request logging 
