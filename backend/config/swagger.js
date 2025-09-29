@@ -1,6 +1,7 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
+const port = process.env.PORT || 5001;
 const options = {
   definition: {
     openapi: '3.0.0',
@@ -14,9 +15,13 @@ const options = {
     },
     servers: [
       {
-        url: 'http://localhost:5001',
+        url: `http://localhost:${port}`,
         description: 'Development server',
       },
+      {
+        url: 'https://emotion-2-uvlo.onrender.com',
+        description: 'Production server',
+      }
     ],
     components: {
       schemas: {
