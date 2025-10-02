@@ -5,17 +5,22 @@ import { v4 as uuidv4 } from 'uuid';
 
 export async function handleChatRequest(req, res) {
 	try {
-		const { message, user = 'test_user' } = req.body;
+		const { message, user_id = 'test_user' } = req.body;
 		const trimmed = typeof message === 'string' ? message.trim() : '';
 		if (!trimmed) {
 			return res.status(400).json({ error: 'Message is required' });
 		}
 
-		// 사용자 메시지 저장과 OpenAI 호출을 병렬 처리
+		// 사용자 질문을 chat_messages에 저장 (새 구조 사용)
 		const messageId = uuidv4();
 		const userInsertPromise = supabase
 			.from('chat_messages')
-			.insert({ id: messageId, user, message: trimmed }, { returning: 'minimal' })
+			.insert({ 
+				id: messageId, 
+				user_id, 
+				user_chat: trimmed,
+				ai_answer: null  // 아직 답변 없음
+			}, { returning: 'minimal' })
 			.then(() => null)
 			.catch((e) => {
 				console.error('User message insert error:', e?.message || e);
@@ -63,12 +68,15 @@ export async function handleChatRequest(req, res) {
 		// 사용자에게 즉시 응답
 		res.send(aiResponse);
 
-		// AI 메시지 저장은 비동기 처리
+		// AI 답변을 해당 메시지에 업데이트 (새 구조 사용)
 		supabase
 			.from('chat_messages')
-			.insert({ id: uuidv4(), user: 'ai', message: aiResponse, parent_message_id: messageId }, { returning: 'minimal' })
+			.update({ 
+				ai_answer: aiResponse
+			})
+			.eq('id', messageId)
 			.then(() => null)
-			.catch((e) => console.error('AI message insert error:', e?.message || e));
+			.catch((e) => console.error('AI answer update error:', e?.message || e));
 
 		userInsertPromise.catch(() => {});
 
